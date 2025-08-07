@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_scalable_ocr/flutter_scalable_ocr.dart';
+import 'package:lenscannerv4/splash_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:excel/excel.dart';
@@ -21,7 +22,11 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Flutter Scalable OCR',
       theme: ThemeData(primarySwatch: Colors.blue),
-      home: const MyHomePage(title: 'Flutter Scalable OCR'),
+      initialRoute: '/',
+      routes: {
+        '/':(context) => const SplashScreen(),
+        '/home': (context) => const MyHomePage(title: 'Flutter Scalable OCR'),
+      },
     );
   }
 }
