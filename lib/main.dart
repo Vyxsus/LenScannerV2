@@ -7,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:excel/excel.dart';
 import 'package:intl/intl.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -55,6 +56,8 @@ class _MyHomePageState extends State<MyHomePage> {
   bool dialogShown = false;
   int cameraSelection = 0;
 
+  final AudioPlayer _audioPlayer = AudioPlayer();
+
   Timer? debounceTimer;
   final GlobalKey<ScalableOCRState> cameraKey = GlobalKey<ScalableOCRState>();
 
@@ -62,6 +65,10 @@ class _MyHomePageState extends State<MyHomePage> {
   void initState() {
     super.initState();
     loadLastScanFromExcel();
+  }
+
+  Future<void> playBeep() async {
+    await _audioPlayer.play(AssetSource('beep.mp3'));
   }
 
   // --- Baca data terakhir dari Excel ---
@@ -90,7 +97,6 @@ class _MyHomePageState extends State<MyHomePage> {
       debugPrint("Gagal baca Excel: $e");
     }
   }
-
 
   // --- Format angka hasil scan ---
   String formatHasil(String hasil) {
@@ -173,7 +179,6 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-
   // --- Konfirmasi sebelum simpan final ---
   Future<void> confirmAndSave() async {
     final confirm = await showDialog<bool>(
@@ -212,8 +217,18 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // --- Konfirmasi hasil scan ---
   Future<void> confirmScan(String hasil, int step) async {
-    final controller = TextEditingController(text: formatHasil(hasil));
-
+    final cleaned = hasil.trim();
+    final onlyDigits = cleaned.replaceAll(RegExp(r'[^0-9]'), '');
+    final hasLetters = RegExp(r'[A-Za-z]').hasMatch(cleaned);
+  
+    // Cek jika ada huruf atau angka tidak sesuai panjang
+    if (onlyDigits.length < 8 || onlyDigits.length > 9 || hasLetters) {
+      await playBeep(); // bunyikan beep jika tidak valid
+      return; // tidak lanjut konfirmasi
+    }
+  
+    final controller = TextEditingController(text: formatHasil(cleaned));
+  
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -237,7 +252,7 @@ class _MyHomePageState extends State<MyHomePage> {
         ],
       ),
     );
-
+  
     if (confirm == true) {
       if (step == 1) {
         hasilScan1 = controller.text.trim();
@@ -251,6 +266,7 @@ class _MyHomePageState extends State<MyHomePage> {
       }
     }
   }
+
 
   // --- Reset scan ---
   void refreshScan() {
