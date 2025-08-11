@@ -68,7 +68,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> playBeep() async {
-    await _audioPlayer.play(AssetSource('beep.mp3'));
+    await _audioPlayer.play(AssetSource('sounds/beep.mp3'));
   }
 
   // --- Baca data terakhir dari Excel ---
@@ -218,48 +218,56 @@ class _MyHomePageState extends State<MyHomePage> {
   // --- Konfirmasi hasil scan ---
   Future<void> confirmScan(String hasil, int step) async {
     final cleaned = hasil.trim();
-    final onlyDigits = cleaned.replaceAll(RegExp(r'[^0-9]'), '');
-    final hasLetters = RegExp(r'[A-Za-z]').hasMatch(cleaned);
-  
-    // Cek jika ada huruf atau angka tidak sesuai panjang
-    if (onlyDigits.length < 8 || onlyDigits.length > 9 || hasLetters) {
-      await playBeep(); // bunyikan beep jika tidak valid
-      return; // tidak lanjut konfirmasi
-    }
-  
     final controller = TextEditingController(text: formatHasil(cleaned));
-  
+
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Konfirmasi Scan $step'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            labelText: "Edit hasil jika perlu",
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Ulang'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
+      barrierDismissible: false, // supaya tidak bisa tutup sembarangan
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setStateDialog) {
+          return AlertDialog(
+            title: Text('Konfirmasi Scan $step'),
+            content: TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: "Edit hasil jika perlu",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Ulang'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final input = controller.text.trim();
+                  final onlyDigits = input.replaceAll(RegExp(r'[^0-9]'), '');
+                  final hasLetters = RegExp(r'[A-Za-z]').hasMatch(input);
+
+                  if (onlyDigits.length < 8 || onlyDigits.length > 8 || hasLetters) {
+                    await playBeep(); // bunyikan beep jika tidak valid
+                    return; // tetap di dialog
+                  }
+
+                  Navigator.of(ctx).pop(true); // baru tutup dialog jika valid
+                },
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        });
+      },
     );
-  
+
     if (confirm == true) {
+      final input = controller.text.trim();
       if (step == 1) {
-        hasilScan1 = controller.text.trim();
+        hasilScan1 = input;
         waktu1 = DateFormat("HH:mm:ss dd/MM/yyyy").format(DateTime.now());
         setState(() => scanStep = 2);
       } else {
-        hasilScan2 = controller.text.trim();
+        hasilScan2 = input;
         waktu2 = DateFormat("HH:mm:ss dd/MM/yyyy").format(DateTime.now());
         hitungSelisih();
         setState(() {}); // Update tampilan hasil scan 2
@@ -271,11 +279,10 @@ class _MyHomePageState extends State<MyHomePage> {
   // --- Reset scan ---
   void refreshScan() {
     setState(() {
-      scanStep = 1;
-      hasilScan1 = "";
       hasilScan2 = "";
       selisih = 0.0;
       selangWaktu = "";
+      waktu2 = "";
     });
   }
 
@@ -320,7 +327,7 @@ class _MyHomePageState extends State<MyHomePage> {
             child: IgnorePointer(
               child: CustomPaint(
                 painter: _ScannerOverlayPainter(
-                  boxHeight : MediaQuery.of(context).size.height / 6,
+                  boxHeight: MediaQuery.of(context).size.height / 6,
                 ),
               ),
             ),
@@ -332,25 +339,24 @@ class _MyHomePageState extends State<MyHomePage> {
               "Scan Number",
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 20,
+                fontSize: 28,
                 fontWeight: FontWeight.bold,
               ),
             ),
           ),
 
-          // Card hasil + input di bawah
           Align(
             alignment: Alignment.bottomCenter,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  margin: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                  padding: EdgeInsets.all(12),
+                  padding: EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -364,19 +370,19 @@ class _MyHomePageState extends State<MyHomePage> {
                   ),
                 ),
 
-                // Tombol Refresh & Simpan
                 Container(
                   color: Colors.brown.shade800,
-                  padding: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                  padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                   child: Row(
                     children: [
                       Expanded(
                         child: TextButton.icon(
                           style: TextButton.styleFrom(
                             foregroundColor: Colors.white,
+                            textStyle: TextStyle(fontSize: 18),
                           ),
                           onPressed: refreshScan,
-                          icon: Icon(Icons.refresh, size: 28),
+                          icon: Icon(Icons.refresh, size: 30),
                           label: Text("REFRESH"),
                         ),
                       ),
@@ -384,9 +390,10 @@ class _MyHomePageState extends State<MyHomePage> {
                         child: TextButton.icon(
                           style: TextButton.styleFrom(
                             foregroundColor: Colors.white,
+                            textStyle: TextStyle(fontSize: 18),
                           ),
                           onPressed: hasilScan2.isNotEmpty ? confirmAndSave : null,
-                          icon: Icon(Icons.download, size: 28),
+                          icon: Icon(Icons.download, size: 30),
                           label: Text("SIMPAN"),
                         ),
                       ),
@@ -400,35 +407,49 @@ class _MyHomePageState extends State<MyHomePage> {
       ),
     );
   }
-  /// Row untuk input text
+
   Widget _buildRowInput(String label, String value, Function(String) onChanged) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: TextStyle(fontWeight: FontWeight.bold)),
+        Text(
+          label,
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        ),
+        SizedBox(height: 4),
         TextField(
+          style: TextStyle(fontSize: 18),
           decoration: InputDecoration(
             isDense: true,
-            contentPadding: EdgeInsets.symmetric(vertical: 4),
+            contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+            border: OutlineInputBorder(),
           ),
           controller: TextEditingController(text: value),
           onChanged: onChanged,
         ),
-        Divider(),
+        SizedBox(height: 12),
       ],
     );
   }
-  /// Row untuk data hasil scan
+
   Widget _buildRowData(String label, String val1, String val2) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Expanded(child: Text(label)),
-            if (val1.isNotEmpty) Text(val1),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (val1.isNotEmpty)
+              Text(val1, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             if (val2.isNotEmpty) SizedBox(width: 8),
-            if (val2.isNotEmpty) Text(val2),
+            if (val2.isNotEmpty)
+              Text(val2, style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic)),
           ],
         ),
         Divider(),
