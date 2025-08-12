@@ -112,17 +112,27 @@ class _MyHomePageState extends State<MyHomePage> {
     double num1 = double.tryParse(hasilScan1) ?? 0;
     double num2 = double.tryParse(hasilScan2) ?? 0;
     selisih = num2 - num1;
-
+  
     try {
       DateFormat format = DateFormat("HH:mm:ss dd/MM/yyyy");
       DateTime t1 = format.parse(waktu1);
       DateTime t2 = format.parse(waktu2);
       Duration diff = t2.difference(t1);
-      selangWaktu = "${diff.inHours} jam ${diff.inMinutes % 60} menit";
+  
+      final days = diff.inDays;
+      final hours = diff.inHours % 24;
+      final minutes = diff.inMinutes % 60;
+  
+      String hasil = "";
+      if (days > 0) hasil += "$days hari ";
+      hasil += "$hours jam $minutes menit";
+  
+      selangWaktu = hasil;
     } catch (_) {
       selangWaktu = "";
     }
   }
+
 
   // --- Simpan ke Excel ---
   Future<void> saveToExcel() async {
@@ -219,20 +229,60 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<void> confirmScan(String hasil, int step) async {
     final cleaned = hasil.trim();
     final controller = TextEditingController(text: formatHasil(cleaned));
+    double parsedSelisih = 0;
+    bool isValid = true;
+    bool showError = false;
 
     final confirm = await showDialog<bool>(
       context: context,
-      barrierDismissible: false, // supaya tidak bisa tutup sembarangan
+      barrierDismissible: false,
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx, setStateDialog) {
+          void validate(String input) {
+            final onlyDigits = input.replaceAll(RegExp(r'[^0-9]'), '');
+            if (onlyDigits.length == 8) {
+              final formatted = input.replaceAll(RegExp(r'[^0-9]'), '');
+              final formattedDouble = double.tryParse(
+                formatted.substring(0, 5) + '.' + formatted.substring(5),
+              );
+              final scan1 = double.tryParse(hasilScan1) ?? 0;
+              parsedSelisih = (formattedDouble ?? 0) - scan1;
+
+              if (parsedSelisih <= 0) {
+                playBeep();
+                setStateDialog(() {
+                  isValid = false;
+                  showError = true;
+                });
+              } else {
+                setStateDialog(() {
+                  isValid = true;
+                  showError = false;
+                });
+              }
+            } else {
+              setStateDialog(() {
+                isValid = false;
+                showError = true;
+              });
+            }
+          }
+
           return AlertDialog(
             title: Text('Konfirmasi Scan $step'),
-            content: TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                labelText: "Edit hasil jika perlu",
-                border: OutlineInputBorder(),
-              ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  decoration: InputDecoration(
+                    labelText: "Edit hasil jika perlu",
+                    border: const OutlineInputBorder(),
+                    errorText: showError ? 'Selisih tidak boleh negatif atau nol.' : null,
+                  ),
+                  onChanged: validate,
+                ),
+              ],
             ),
             actions: [
               TextButton(
@@ -240,18 +290,9 @@ class _MyHomePageState extends State<MyHomePage> {
                 child: const Text('Ulang'),
               ),
               ElevatedButton(
-                onPressed: () async {
-                  final input = controller.text.trim();
-                  final onlyDigits = input.replaceAll(RegExp(r'[^0-9]'), '');
-                  final hasLetters = RegExp(r'[A-Za-z]').hasMatch(input);
-
-                  if (onlyDigits.length < 8 || onlyDigits.length > 8 || hasLetters) {
-                    await playBeep(); // bunyikan beep jika tidak valid
-                    return; // tetap di dialog
-                  }
-
-                  Navigator.of(ctx).pop(true); // baru tutup dialog jika valid
-                },
+                onPressed: isValid
+                    ? () => Navigator.of(ctx).pop(true)
+                    : null,
                 child: const Text('OK'),
               ),
             ],
@@ -270,11 +311,10 @@ class _MyHomePageState extends State<MyHomePage> {
         hasilScan2 = input;
         waktu2 = DateFormat("HH:mm:ss dd/MM/yyyy").format(DateTime.now());
         hitungSelisih();
-        setState(() {}); // Update tampilan hasil scan 2
+        setState(() {});
       }
     }
   }
-
 
   // --- Reset scan ---
   void refreshScan() {
