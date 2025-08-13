@@ -3,13 +3,20 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_scalable_ocr/flutter_scalable_ocr.dart';
 import 'package:lenscannerv4/splash_screen.dart';
+import 'my_home_page_ui.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:excel/excel.dart';
 import 'package:intl/intl.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:lenscannerv4/login_page.dart';
 
-void main() async {
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   await Permission.camera.request();
   await Permission.storage.request();
   runApp(const MyApp());
@@ -17,14 +24,16 @@ void main() async {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Flutter Scalable OCR',
       theme: ThemeData(primarySwatch: Colors.blue),
+      home: AuthWrapper(),
       initialRoute: '/',
       routes: {
-        '/':(context) => const SplashScreen(),
+        '/':(context)=> const SplashScreen(),
         '/home': (context) => const MyHomePage(title: 'Flutter Scalable OCR'),
       },
     );
@@ -37,6 +46,24 @@ class MyHomePage extends StatefulWidget {
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class AuthWrapper extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        if (snapshot.hasData) {
+          return const MyHomePage(title: 'LenScanner');
+        }
+        return const LoginPage();
+      },
+    );
+  }
 }
 
 class _MyHomePageState extends State<MyHomePage> {
@@ -55,13 +82,36 @@ class _MyHomePageState extends State<MyHomePage> {
   bool dialogShown = false;
   int cameraSelection = 0;
 
+  final AudioPlayer _audioPlayer = AudioPlayer();
+
+  final TextEditingController nameController = TextEditingController();
+  final TextEditingController idController = TextEditingController();
+
   Timer? debounceTimer;
   final GlobalKey<ScalableOCRState> cameraKey = GlobalKey<ScalableOCRState>();
 
   @override
   void initState() {
     super.initState();
+    nameController.text = name;
+    idController.text = id;
+    // listener agar variabel name/id tetap update
+    nameController.addListener(() => name = nameController.text);
+    idController.addListener(() => id = idController.text);
     loadLastScanFromExcel();
+  }
+
+  @override
+  void dispose() {
+    debounceTimer?.cancel();
+    _audioPlayer.dispose();
+    nameController.dispose();
+    idController.dispose();
+    super.dispose();
+  }
+
+  Future<void> playBeep() async {
+    await _audioPlayer.play(AssetSource('sounds/beep.mp3'));
   }
 
   // --- Baca data terakhir dari Excel ---
@@ -91,7 +141,6 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-
   // --- Format angka hasil scan ---
   String formatHasil(String hasil) {
     String angkaBersih = hasil.replaceAll(RegExp(r'[^0-9]'), '');
@@ -106,17 +155,27 @@ class _MyHomePageState extends State<MyHomePage> {
     double num1 = double.tryParse(hasilScan1) ?? 0;
     double num2 = double.tryParse(hasilScan2) ?? 0;
     selisih = num2 - num1;
-
+  
     try {
       DateFormat format = DateFormat("HH:mm:ss dd/MM/yyyy");
       DateTime t1 = format.parse(waktu1);
       DateTime t2 = format.parse(waktu2);
       Duration diff = t2.difference(t1);
-      selangWaktu = "${diff.inHours} jam ${diff.inMinutes % 60} menit";
+  
+      final days = diff.inDays;
+      final hours = diff.inHours % 24;
+      final minutes = diff.inMinutes % 60;
+  
+      String hasil = "";
+      if (days > 0) hasil += "$days hari ";
+      hasil += "$hours jam $minutes menit";
+  
+      selangWaktu = hasil;
     } catch (_) {
       selangWaktu = "";
     }
   }
+
 
   // --- Simpan ke Excel ---
   Future<void> saveToExcel() async {
@@ -167,12 +226,13 @@ class _MyHomePageState extends State<MyHomePage> {
   
     // Setelah save, langsung refresh data terakhir untuk scan berikutnya
     await loadLastScanFromExcel();
-  
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Data tersimpan di: $filePath')),
-    );
-  }
 
+    if(mounted){
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Data tersimpan di: $filePath')),
+      );
+    }
+  }
 
   // --- Konfirmasi sebelum simpan final ---
   Future<void> confirmAndSave() async {
@@ -212,42 +272,91 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // --- Konfirmasi hasil scan ---
   Future<void> confirmScan(String hasil, int step) async {
-    final controller = TextEditingController(text: formatHasil(hasil));
+    final cleaned = hasil.trim();
+    final controller = TextEditingController(text: formatHasil(cleaned));
+    double parsedSelisih = 0;
+    bool isValid = true;
+    bool showError = false;
 
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Konfirmasi Scan $step'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            labelText: "Edit hasil jika perlu",
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Ulang'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setStateDialog) {
+          void validate(String input) {
+            final onlyDigits = input.replaceAll(RegExp(r'[^0-9]'), '');
+            if (onlyDigits.length == 8) {
+              final formatted = input.replaceAll(RegExp(r'[^0-9]'), '');
+              final formattedDouble = double.tryParse(
+                formatted.substring(0, 5) + '.' + formatted.substring(5),
+              );
+              final scan1 = double.tryParse(hasilScan1) ?? 0;
+              parsedSelisih = (formattedDouble ?? 0) - scan1;
+
+              if (parsedSelisih <= 0) {
+                playBeep();
+                setStateDialog(() {
+                  isValid = false;
+                  showError = true;
+                });
+              } else {
+                setStateDialog(() {
+                  isValid = true;
+                  showError = false;
+                });
+              }
+            } else {
+              setStateDialog(() {
+                isValid = false;
+                showError = true;
+              });
+            }
+          }
+
+          return AlertDialog(
+            title: Text('Konfirmasi Scan $step'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  decoration: InputDecoration(
+                    labelText: "Edit hasil jika perlu",
+                    border: const OutlineInputBorder(),
+                    errorText: showError ? 'Selisih tidak boleh negatif atau nol.' : null,
+                  ),
+                  onChanged: validate,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Ulang'),
+              ),
+              ElevatedButton(
+                onPressed: isValid
+                    ? () => Navigator.of(ctx).pop(true)
+                    : null,
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        });
+      },
     );
 
     if (confirm == true) {
+      final input = controller.text.trim();
       if (step == 1) {
-        hasilScan1 = controller.text.trim();
+        hasilScan1 = input;
         waktu1 = DateFormat("HH:mm:ss dd/MM/yyyy").format(DateTime.now());
         setState(() => scanStep = 2);
       } else {
-        hasilScan2 = controller.text.trim();
+        hasilScan2 = input;
         waktu2 = DateFormat("HH:mm:ss dd/MM/yyyy").format(DateTime.now());
         hitungSelisih();
-        setState(() {}); // Update tampilan hasil scan 2
+        setState(() {});
       }
     }
   }
@@ -255,198 +364,49 @@ class _MyHomePageState extends State<MyHomePage> {
   // --- Reset scan ---
   void refreshScan() {
     setState(() {
-      scanStep = 1;
-      hasilScan1 = "";
       hasilScan2 = "";
       selisih = 0.0;
       selangWaktu = "";
+      waktu2 = "";
     });
   }
-
+  // dipanggil UI saat OCR mengirim teks; debounced & dialog guard ada di sini
+  Future<void> _onScanValue(String value) async {
+    if (value.isEmpty || dialogShown) return;
+    debounceTimer?.cancel();
+    debounceTimer = Timer(const Duration(milliseconds: 800), () async {
+      dialogShown = true;
+      if (scanStep == 1) {
+        await confirmScan(value, 1);
+      } else {
+        await confirmScan(value, 2);
+      }
+      dialogShown = false;
+    });
+  }
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: ScalableOCR(
-              key: cameraKey,
-              torchOn: torchOn,
-              cameraSelection: cameraSelection,
-              lockCamera: true,
-              paintboxCustom: Paint()
-                ..style = PaintingStyle.stroke
-                ..strokeWidth = 4.0
-                ..color = Colors.green,
-              boxLeftOff: 5,
-              boxBottomOff: 2.5,
-              boxRightOff: 5,
-              boxTopOff: 2.5,
-              boxHeight: MediaQuery.of(context).size.height / 3,
-              getScannedText: (value) {
-                if (value.isEmpty || dialogShown) return;
-                debounceTimer?.cancel();
-                debounceTimer = Timer(const Duration(milliseconds: 800), () async {
-                  dialogShown = true;
-                  if (scanStep == 1) {
-                    await confirmScan(value, 1);
-                  } else {
-                    await confirmScan(value, 2);
-                  }
-                  dialogShown = false;
-                });
-              },
-            ),
-          ),
+    // ukuran kotak scan disamakan untuk kamera & overlay
+    final double scanBoxHeight = MediaQuery.of(context).size.height / 3;
 
-          Positioned.fill(
-            child: IgnorePointer(
-              child: CustomPaint(
-                painter: _ScannerOverlayPainter(
-                  boxHeight : MediaQuery.of(context).size.height / 6,
-                ),
-              ),
-            ),
-          ),
-
-          Align(
-            alignment: Alignment(0, -0.3),
-            child: Text(
-              "Scan Number",
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-
-          // Card hasil + input di bawah
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildRowInput("Nama", name, (val) => setState(() => name = val)),
-                      _buildRowInput("ID", id, (val) => setState(() => id = val)),
-                      _buildRowData("Hasil Baca Sebelumnya", hasilScan1, waktu1),
-                      _buildRowData("Hasil Baca Saat Ini", hasilScan2, waktu2),
-                      _buildRowData("Selisih Pembacaan", selisih.toString(), ""),
-                      _buildRowData("Selang Waktu", selangWaktu, ""),
-                    ],
-                  ),
-                ),
-
-                // Tombol Refresh & Simpan
-                Container(
-                  color: Colors.brown.shade800,
-                  padding: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextButton.icon(
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.white,
-                          ),
-                          onPressed: refreshScan,
-                          icon: Icon(Icons.refresh, size: 28),
-                          label: Text("REFRESH"),
-                        ),
-                      ),
-                      Expanded(
-                        child: TextButton.icon(
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.white,
-                          ),
-                          onPressed: hasilScan2.isNotEmpty ? confirmAndSave : null,
-                          icon: Icon(Icons.download, size: 28),
-                          label: Text("SIMPAN"),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  /// Row untuk input text
-  Widget _buildRowInput(String label, String value, Function(String) onChanged) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: TextStyle(fontWeight: FontWeight.bold)),
-        TextField(
-          decoration: InputDecoration(
-            isDense: true,
-            contentPadding: EdgeInsets.symmetric(vertical: 4),
-          ),
-          controller: TextEditingController(text: value),
-          onChanged: onChanged,
-        ),
-        Divider(),
-      ],
-    );
-  }
-  /// Row untuk data hasil scan
-  Widget _buildRowData(String label, String val1, String val2) {
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(child: Text(label)),
-            if (val1.isNotEmpty) Text(val1),
-            if (val2.isNotEmpty) SizedBox(width: 8),
-            if (val2.isNotEmpty) Text(val2),
-          ],
-        ),
-        Divider(),
-      ],
+    return MyHomePageUI(
+      title: widget.title,
+      torchOn: torchOn,
+      onToggleTorch: () => setState(() => torchOn = !torchOn),
+      cameraSelection: cameraSelection,
+      cameraKey: cameraKey,
+      scanBoxHeight: scanBoxHeight,
+      onScanValue: _onScanValue,
+      nameController: nameController,
+      idController: idController,
+      hasilScan1: hasilScan1,
+      waktu1: waktu1,
+      hasilScan2: hasilScan2,
+      waktu2: waktu2,
+      selisih: selisih,
+      selangWaktu: selangWaktu,
+      onRefresh: refreshScan,
+      onSave: hasilScan2.isNotEmpty ? confirmAndSave : null,
     );
   }
 }
-/// Painter untuk membuat area luar scan box gelap
-  class _ScannerOverlayPainter extends CustomPainter {
-    final double boxHeight;
-    _ScannerOverlayPainter({required this.boxHeight});
-
-    @override
-    void paint(Canvas canvas, Size size) {
-      final paint = Paint()
-        ..color = Colors.black.withOpacity(0.6)
-        ..style = PaintingStyle.fill;
-
-      final rect = Rect.fromLTWH(
-        20,
-        size.height / 2 - boxHeight / 2,
-        size.width - 40,
-        boxHeight,
-      );
-
-      // Gambarkan overlay hitam seluruh layar
-      canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
-
-      // Potong kotak scan agar transparan
-      final clearPaint = Paint()
-        ..blendMode = BlendMode.clear;
-      canvas.drawRect(rect, clearPaint);
-    }
-
-    @override
-    bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-  }
