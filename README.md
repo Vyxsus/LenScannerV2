@@ -1,7 +1,3 @@
-Berikut versi README yang lebih menarik, informatif, dan profesional untuk proyek `LenScanner`:
-
----
-
 # 📸 LenScanner
 
 **Aplikasi Flutter untuk Pembacaan Data Kamera Real-Time & Penyimpanan Otomatis ke Excel**
