@@ -8,9 +8,13 @@ import 'package:path_provider/path_provider.dart';
 import 'package:excel/excel.dart';
 import 'package:intl/intl.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:lenscannerv4/login_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   await Permission.camera.request();
   await Permission.storage.request();
   runApp(const MyApp());
@@ -23,9 +27,9 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Flutter Scalable OCR',
       theme: ThemeData(primarySwatch: Colors.blue),
+      home: AuthWrapper(),
       initialRoute: '/',
       routes: {
-        '/':(context) => const SplashScreen(),
         '/home': (context) => const MyHomePage(title: 'Flutter Scalable OCR'),
       },
     );
@@ -38,6 +42,24 @@ class MyHomePage extends StatefulWidget {
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class AuthWrapper extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        if (snapshot.hasData) {
+          return const MyHomePage(title: 'LenScanner');
+        }
+        return const LoginPage();
+      },
+    );
+  }
 }
 
 class _MyHomePageState extends State<MyHomePage> {

@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "667202703713",
+    "project_id": "lenscanner-a6409",
+    "storage_bucket": "lenscanner-a6409.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:667202703713:android:8e71fd9224b1c5e9d93520",
+        "android_client_info": {
+          "package_name": "com.example.lenscanner4"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "667202703713-luuun2o29p1h6286v54eiaq6pdugsdo9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.lenscanner4",
+            "certificate_hash": "3a6496d428832c09d261edb0f741e9ed60d14895"
+          }
+        },
+        {
+          "client_id": "667202703713-dqg8d813tm5mahpq4v4klkjg7hfb2oa2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBP1_scoSLCrnxg_38VeiVVoHKc4vB3_3o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "667202703713-dqg8d813tm5mahpq4v4klkjg7hfb2oa2.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
