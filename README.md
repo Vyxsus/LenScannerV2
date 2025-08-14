@@ -28,6 +28,9 @@ Memberikan umpan balik audio saat terjadi kesalahan input atau proses gagal.
 ✅ **Load Data Sebelumnya**
 Otomatis memuat hasil scan terakhir saat aplikasi dibuka kembali.
 
+✅ **Login**
+Login menggunakan Google!
+
 ---
 
 ## 📁 Struktur Folder Penting
