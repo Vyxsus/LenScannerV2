@@ -2,7 +2,7 @@ import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_scalable_ocr/flutter_scalable_ocr.dart';
-import 'package:lenscannerv4/splash_screen.dart';
+//-import 'package:lenscannerv4/splash_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:excel/excel.dart';
@@ -27,11 +27,12 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Flutter Scalable OCR',
       theme: ThemeData(primarySwatch: Colors.blue),
-      home: AuthWrapper(),
-      initialRoute: '/',
-      routes: {
-        '/home': (context) => const MyHomePage(title: 'Flutter Scalable OCR'),
-      },
+      //home: const MyHomePage(title: 'LenScanner'),
+      home: const AuthWrapper(),
+      // initialRoute: '/',
+      // routes: {
+        // '/home': (context) => const MyHomePage(title: 'Flutter Scalable OCR'),
+      // },
     );
   }
 }
@@ -45,22 +46,41 @@ class MyHomePage extends StatefulWidget {
 }
 
 class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({Key? key}) : super(key: key);
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
+        //1. Kalau ada error, tampilkan pesan
+        if (snapshot.hasError) {
+          return Scaffold(
+            body: Center(
+              child: Text('Terjadi kesalahan: ${snapshot.error}'),
+            ),
+          );
+        }
+        //2. Tunggu sampai stream aktif (loaded)
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
-        if (snapshot.hasData) {
-          return const MyHomePage(title: 'LenScanner');
+        //3. Kalau user sudah login (data != null), masuk ke Home
+        if (snapshot.data != null) {
+          return MyHomePage(
+            key: ValueKey(snapshot.data!.uid),
+            title: 'LenScanner',
+          );
         }
+        //4. Kalau belum login, tampilkan LoginPage
         return const LoginPage();
       },
     );
   }
 }
+
 
 class _MyHomePageState extends State<MyHomePage> {
   String name = "";
@@ -86,37 +106,119 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-    loadLastScanFromExcel();
+    ensureAllFilesAccess().then((granted) {
+      if (granted) loadLastScanFromExcel();
+    });
   }
 
   Future<void> playBeep() async {
     await _audioPlayer.play(AssetSource('sounds/beep.mp3'));
   }
 
+
+  Future<Directory?> getDownloadDirectory() async {
+    // 1) Pastikan permission
+    if (Platform.isAndroid) {
+      if (await Permission.storage.isDenied) {
+        await Permission.storage.request();
+      }
+      if (Platform.version.contains('SDK 30') ||
+          Platform.version.contains('SDK 31') ||
+          Platform.version.contains('SDK 32')) {
+        // Android 11+ gunakan MANAGE
+        if (await Permission.manageExternalStorage.isDenied) {
+          await Permission.manageExternalStorage.request();
+        }
+      }
+    }
+
+    // 2) Coba langsung path hard-coded
+    final direct = Directory('/storage/emulated/0/Download');
+    if (await direct.exists()) {
+      debugPrint("📂 Hard-coded Download dir: ${direct.path}");
+      return direct;
+    }
+
+    // 3) Fallback ke path_provider
+    final dirs = await getExternalStorageDirectories(type: StorageDirectory.downloads);
+    if (dirs != null && dirs.isNotEmpty) {
+      debugPrint("📂 Fallback Download dir: ${dirs.first.path}");
+      return dirs.first;
+    }
+
+    debugPrint("❌ getDownloadDirectory: gagal menemukan folder download");
+    return null;
+  }
+
+
+  Future<void> requestStoragePermission() async {
+    if (await Permission.manageExternalStorage.request().isGranted) {
+      print("✅ Izin storage diberikan");
+    } else {
+      print("❌ Izin storage ditolak");
+    }
+  }
+
+  Future<bool> ensureAllFilesAccess() async {
+    var status = await Permission.manageExternalStorage.status;
+    if (status.isGranted) return true;
+
+    // Minta izin
+    status = await Permission.manageExternalStorage.request();
+    if (status.isGranted) return true;
+
+    // Jika masih ditolak, arahkan user ke Settings
+    await openAppSettings();
+    return false;
+  }
+
+
   // --- Baca data terakhir dari Excel ---
   Future<void> loadLastScanFromExcel() async {
+    final downloadsDir = await getDownloadDirectory();
+    if (downloadsDir == null) {
+      // return saja tanpa Snackbar
+      return;
+    }
+
+    final filePath = '${downloadsDir.path}/DataScan.xlsx';
+    final file = File(filePath);
+
+    if (!file.existsSync()) {
+      // buat file baru jika belum ada
+      final excel = Excel.createExcel();
+      final sheet = excel['Sheet1'];
+      sheet.appendRow([
+        'Nama',
+        'ID',
+        'Hasil Scan 1',
+        'Hasil Scan 2',
+        'Selisih',
+        'Waktu Simpan',
+      ]);
+      final bytes = excel.encode();
+      if (bytes != null) {
+        await file.writeAsBytes(bytes, flush: true);
+      }
+      return;
+    }
+
+    // baca file yang sudah ada
     try {
-      final filePath = '/storage/emulated/0/Download/DataScan.xlsx';
-      final file = File(filePath);
-  
-      if (!file.existsSync()) return;
-  
       final bytes = file.readAsBytesSync();
       final excel = Excel.decodeBytes(bytes);
       final sheet = excel['Sheet1'];
-  
+
       if (sheet.rows.length > 1) {
-        var lastRow = sheet.rows.last;
-  
-        // Ambil hasil scan 2 terakhir sebagai hasilScan1 untuk pembacaan berikutnya
+        final lastRow = sheet.rows.last;
         setState(() {
-          hasilScan1 = lastRow[3]?.value.toString() ?? ""; // kolom hasil scan 2
-          waktu1 = lastRow[5]?.value.toString() ?? "";
-          scanStep = 2; // langsung ke scan kedua
+          hasilScan1 = lastRow[3]?.value.toString() ?? "";
+          waktu1     = lastRow[5]?.value.toString() ?? "";
+          scanStep   = 2;
         });
       }
-    } catch (e) {
-      debugPrint("Gagal baca Excel: $e");
+    } catch (_) {
+      // silent fail
     }
   }
 
@@ -158,57 +260,38 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // --- Simpan ke Excel ---
   Future<void> saveToExcel() async {
-    final now = DateTime.now();
-    waktu2 = DateFormat("HH:mm:ss dd/MM/yyyy").format(now);
-    hitungSelisih();
-  
-    Directory downloadsDir = Directory('/storage/emulated/0/Download');
-    if (!downloadsDir.existsSync()) {
-      downloadsDir = await getExternalStorageDirectory() ?? downloadsDir;
+    try {
+      final downloadsDir = await getDownloadDirectory();
+      if (downloadsDir == null) return;
+
+      if (!await ensureAllFilesAccess()) return;
+
+      final filePath = '${downloadsDir.path}/DataScan.xlsx';
+      final file = File(filePath);
+
+      Excel excel;
+      Sheet sheet;
+      if (file.existsSync()) {
+        final bytes = file.readAsBytesSync();
+        excel = Excel.decodeBytes(bytes);
+        sheet = excel['Sheet1'];
+      } else {
+        excel = Excel.createExcel();
+        sheet = excel['Sheet1'];
+        sheet.appendRow(['Nama','ID','Hasil Scan 1','Hasil Scan 2','Selisih','Waktu Simpan']);
+      }
+
+      sheet.appendRow([name, id, hasilScan1, hasilScan2, selisih.toString(), waktu2]);
+
+      final fileBytes = excel.encode();
+      if (fileBytes != null) {
+        await file.writeAsBytes(fileBytes, flush: true);
+        // langsung refresh data
+        await loadLastScanFromExcel();
+      }
+    } catch (_) {
+      // silent fail
     }
-  
-    final filePath = '${downloadsDir.path}/DataScan.xlsx';
-    final file = File(filePath);
-  
-    Excel excel;
-    Sheet sheet;
-  
-    if (file.existsSync()) {
-      final bytes = file.readAsBytesSync();
-      excel = Excel.decodeBytes(bytes);
-      sheet = excel['Sheet1'];
-    } else {
-      excel = Excel.createExcel();
-      sheet = excel['Sheet1'];
-      sheet.appendRow([
-        'Nama',
-        'ID',
-        'Hasil Scan 1',
-        'Hasil Scan 2',
-        'Selisih',
-        'Waktu Simpan'
-      ]);
-    }
-  
-    // Simpan data baru
-    sheet.appendRow([
-      name,
-      id,
-      hasilScan1,
-      hasilScan2,
-      selisih.toString(),
-      waktu2
-    ]);
-  
-    final fileBytes = excel.encode();
-    await file.writeAsBytes(fileBytes!);
-  
-    // Setelah save, langsung refresh data terakhir untuk scan berikutnya
-    await loadLastScanFromExcel();
-  
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Data tersimpan di: $filePath')),
-    );
   }
 
   // --- Konfirmasi sebelum simpan final ---
@@ -251,91 +334,68 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<void> confirmScan(String hasil, int step) async {
     final cleaned = hasil.trim();
     final controller = TextEditingController(text: formatHasil(cleaned));
-    double parsedSelisih = 0;
-    bool isValid = true;
-    bool showError = false;
 
-    final confirm = await showDialog<bool>(
+    bool isInputValid(String input) {
+      final onlyDigits = input.replaceAll(RegExp(r'[^0-9]'), '');
+      // Harus tepat 8 digit
+      if (onlyDigits.length != 8) return false;
+      // Jika step 2, pastikan selisih > 0
+      if (step == 2) {
+        final parsed = double.tryParse(
+          '${onlyDigits.substring(0, 5)}.${onlyDigits.substring(5)}',
+        ) ??
+            0;
+        final scan1 = double.tryParse(hasilScan1) ?? 0;
+        return parsed > scan1;
+      }
+      return true;
+    }
+
+    await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) {
-        return StatefulBuilder(builder: (ctx, setStateDialog) {
-          void validate(String input) {
-            final onlyDigits = input.replaceAll(RegExp(r'[^0-9]'), '');
-            if (onlyDigits.length == 8) {
-              final formatted = input.replaceAll(RegExp(r'[^0-9]'), '');
-              final formattedDouble = double.tryParse(
-                formatted.substring(0, 5) + '.' + formatted.substring(5),
-              );
-              final scan1 = double.tryParse(hasilScan1) ?? 0;
-              parsedSelisih = (formattedDouble ?? 0) - scan1;
-
-              if (parsedSelisih <= 0) {
+      builder: (ctx) => AlertDialog(
+        title: Text('Konfirmasi Scan $step'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: "Edit hasil jika perlu",
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Ulang'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final input = controller.text.trim();
+              final valid = isInputValid(input);
+              if (!valid) {
+                // Mainkan beep hanya jika input tidak valid
                 playBeep();
-                setStateDialog(() {
-                  isValid = false;
-                  showError = true;
-                });
-              } else {
-                setStateDialog(() {
-                  isValid = true;
-                  showError = false;
-                });
+                return;
               }
-            } else {
-              setStateDialog(() {
-                isValid = false;
-                showError = true;
-              });
-            }
-          }
-
-          return AlertDialog(
-            title: Text('Konfirmasi Scan $step'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: controller,
-                  decoration: InputDecoration(
-                    labelText: "Edit hasil jika perlu",
-                    border: const OutlineInputBorder(),
-                    errorText: showError ? 'Selisih tidak boleh negatif atau nol.' : null,
-                  ),
-                  onChanged: validate,
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('Ulang'),
-              ),
-              ElevatedButton(
-                onPressed: isValid
-                    ? () => Navigator.of(ctx).pop(true)
-                    : null,
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        });
-      },
+              // Hanya sampai sini jika valid
+              if (step == 1) {
+                hasilScan1 = input;
+                waktu1 = DateFormat("HH:mm:ss dd/MM/yyyy").format(DateTime.now());
+                setState(() => scanStep = 2);
+              } else {
+                hasilScan2 = input;
+                waktu2 = DateFormat("HH:mm:ss dd/MM/yyyy").format(DateTime.now());
+                hitungSelisih();
+                setState(() {});
+              }
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
     );
-
-    if (confirm == true) {
-      final input = controller.text.trim();
-      if (step == 1) {
-        hasilScan1 = input;
-        waktu1 = DateFormat("HH:mm:ss dd/MM/yyyy").format(DateTime.now());
-        setState(() => scanStep = 2);
-      } else {
-        hasilScan2 = input;
-        waktu2 = DateFormat("HH:mm:ss dd/MM/yyyy").format(DateTime.now());
-        hitungSelisih();
-        setState(() {});
-      }
-    }
   }
 
   // --- Reset scan ---
@@ -519,6 +579,32 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 }
+
+Widget _buildScanWithTime(String label, String value, String time) {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label,
+        style: TextStyle(fontWeight: FontWeight.bold),
+      ),
+      SizedBox(height: 4),
+      Text(
+        value,
+        style: TextStyle(fontSize: 16),
+      ),
+      if (time.isNotEmpty) ...[
+        SizedBox(height: 2),
+        Text(
+          time,
+          style: TextStyle(color: Colors.grey),
+        ),
+      ],
+      SizedBox(height: 12), // spacing antar blok
+    ],
+  );
+}
+
 /// Painter untuk membuat area luar scan box gelap
   class _ScannerOverlayPainter extends CustomPainter {
     final double boxHeight;
