@@ -61,13 +61,16 @@ class _LoginPageState extends State<LoginPage> {
             if (error.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                child: Text(error, style: TextStyle(color: Colors.red)),
+                child: Text(error, style: const TextStyle(color: Colors.red)),
               ),
             ElevatedButton.icon(
               icon: const Icon(Icons.login),
               label: loading
                   ? const SizedBox(
-                  width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Text('Login dengan Google'),
               onPressed: loading ? null : signInWithGoogle,
             ),
